@@ -1,8 +1,8 @@
-import json, os, requests, base64, logging
+import json, os, requests, base64, logging, sys
 from io import BytesIO
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram.error import TelegramError, NetworkError, TimedOut
+from telegram.error import TelegramError, NetworkError, TimedOut, RetryAfter, BadRequest
 
 # ==============================
 # CONFIGURACIÓN DE LOGGING
@@ -10,9 +10,14 @@ from telegram.error import TelegramError, NetworkError, TimedOut
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 logger = logging.getLogger(__name__)
+# Habilitar logging detallado de la librería de telegram
+logging.getLogger('telegram').setLevel(logging.INFO)
 
 # ==============================
 # CONFIGURACIÓN
@@ -1130,8 +1135,44 @@ async def dnis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
 
+    # Verificar que el token existe
+    if not TOKEN or TOKEN == "":
+        logger.error("❌ ERROR: No se encontró el token de Telegram")
+        logger.error("Configura la variable de entorno TELEGRAM_TOKEN o verifica el código")
+        sys.exit(1)
+    
+    logger.info(f"✅ Token encontrado: {TOKEN[:10]}...{TOKEN[-5:]}")
+    
+    # Verificar que el token sea válido haciendo una petición a la API
+    logger.info("🔍 Verificando token con la API de Telegram...")
+    try:
+        test_url = f"https://api.telegram.org/bot{TOKEN}/getMe"
+        response = requests.get(test_url, timeout=10)
+        if response.status_code == 200:
+            bot_info = response.json()
+            if bot_info.get("ok"):
+                logger.info(f"✅ Token válido. Bot: @{bot_info['result'].get('username', 'N/A')}")
+            else:
+                logger.error(f"❌ Token inválido: {bot_info.get('description', 'Error desconocido')}")
+                sys.exit(1)
+        else:
+            logger.error(f"❌ Error al verificar token. Status code: {response.status_code}")
+            logger.error(f"Respuesta: {response.text}")
+            sys.exit(1)
+    except requests.exceptions.Timeout:
+        logger.error("❌ Timeout al verificar token. Problema de conectividad.")
+        logger.warning("⚠️ Continuando de todas formas...")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Error de conexión al verificar token: {e}")
+        logger.warning("⚠️ Continuando de todas formas...")
+    
     # Construir la aplicación con configuración mejorada
-    app = ApplicationBuilder().token(TOKEN).build()
+    try:
+        app = ApplicationBuilder().token(TOKEN).build()
+        logger.info("✅ Aplicación construida correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error al construir la aplicación: {e}")
+        sys.exit(1)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("register", register))
@@ -1162,26 +1203,48 @@ def main():
     logger.info("🔥 BUDA MARKET BOT INICIADO…")
     print("🔥 BUDA MARKET BOT INICIADO…")
     
+    # Handler global de errores
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Maneja errores no capturados por los handlers."""
+        logger.error(f"Exception mientras se manejaba un update: {context.error}")
+        
+        # Log del traceback completo
+        import traceback
+        logger.error(f"Traceback completo:\n{''.join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__))}")
+    
+    app.add_error_handler(error_handler)
+    
     # Ejecutar con manejo de errores mejorado
     # run_polling ya maneja reconexiones automáticas, pero agregamos logging
     try:
+        logger.info("🔄 Iniciando polling...")
         app.run_polling(
             drop_pending_updates=True,
-            close_loop=False
+            close_loop=False,
+            stop_signals=None  # Para que no se detenga con señales en Render
         )
     except KeyboardInterrupt:
-        logger.info("Bot detenido por el usuario")
+        logger.info("⚠️ Bot detenido por el usuario")
     except (NetworkError, TimedOut) as e:
-        logger.error(f"Error de red o timeout: {e}")
-        logger.info("El bot intentará reconectarse automáticamente...")
+        logger.error(f"❌ Error de red o timeout: {type(e).__name__}: {e}")
+        logger.info("🔄 El bot intentará reconectarse automáticamente...")
         # run_polling maneja reconexiones automáticamente
         raise
+    except RetryAfter as e:
+        logger.warning(f"⏳ Rate limit alcanzado. Esperando {e.retry_after} segundos...")
+        raise
+    except BadRequest as e:
+        logger.error(f"❌ Error de petición inválida: {e}")
+        logger.error("Verifica que el token sea válido")
+        raise
     except TelegramError as e:
-        logger.error(f"Error de Telegram API: {e}")
+        logger.error(f"❌ Error de Telegram API: {type(e).__name__}: {e}")
         logger.error("Verifica que el token sea válido y que el bot esté activo")
         raise
     except Exception as e:
-        logger.error(f"Error inesperado: {type(e).__name__}: {e}")
+        logger.error(f"❌ Error inesperado: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"Traceback completo:\n{''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
         raise
 
 
