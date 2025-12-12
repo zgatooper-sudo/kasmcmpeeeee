@@ -1,14 +1,13 @@
-import json, os
-import logging
+import json, os, requests, base64
+from io import BytesIO
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram.error import Conflict, RetryAfter, NetworkError
 
 # ==============================
 # CONFIGURACIÓN
 # ==============================
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8203432554:AAGAZjEgMjAIkUAMP-LJoYMobooz6N0Y4ug")
+TOKEN = "8203432554:AAGAZjEgMjAIkUAMP-LJoYMobooz6N0Y4ug"
 
 OWNERS = [6251510385, 8257283392,8306043445]  # AGREGA TUS IDS
 
@@ -468,6 +467,63 @@ async def anunciochip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ Error enviando el anuncio: {e}")
 
 # ==============================
+# /ANUNCIOG5 — OWNER o REVENDEDOR
+# ==============================
+
+async def anunciog5(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user
+    uid = str(user.id)
+    uid_int = user.id
+
+    # 🔒 SOLO OWNERS O REVENDEDORES
+    if not (es_owner(uid_int) or es_revendedor(uid)):
+        await update.message.reply_text(
+            "⛔ No tienes permisos para usar este comando.\n\n"
+            "Este anuncio solo puede ser enviado por revendedores verificados o owners.\n\n"
+            "Para convertirte en revendedor contacta:\n"
+            "• @budaoficial2008\n"
+            "• @ElRealCheffcito",
+            parse_mode="HTML"
+        )
+        return
+
+    # 📌 SOLO se envía al usuario que lo invoca
+    chat_id = user.id
+
+    base = os.path.dirname(os.path.abspath(__file__))
+    img_path = os.path.join(base, "billetes.jpeg")
+
+    texto = (
+        "🔥 <b>𝐁𝐈𝐋𝐋𝐄𝐓𝐄𝐒 𝐆5️⃣</b> 🔥\n\n"
+        "✅ Calidad <b>10/10</b> ultra realista\n"
+        "✅ Papel <b>100% algodón</b>\n"
+        "✅ Marca de agua\n"
+        "✅ Sellos y firmas originales\n\n"
+        "📦 Envíos a todo el Perú\n"
+        "🚚 Despacho rápido por <b>SHALOM</b>\n\n"
+        "📌 <b>Stock limitado</b>\n\n"
+        "🏅 <b>CERTIFICADO EN RDB</b>"
+    )
+
+    try:
+        with open(img_path, "rb") as img:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=img,
+                caption=texto,
+                parse_mode="HTML"
+            )
+
+        await update.message.reply_text(
+            "📨 Tu anuncio de *Billetes G5* fue enviado a tu bandeja privada.",
+            parse_mode="Markdown"
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Error enviando el anuncio: {e}")
+
+# ==============================
 # MENÚ PRINCIPAL (FOTO + CAPTION + BOTONES)
 # ==============================
 
@@ -893,7 +949,9 @@ async def delrevendedor(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔄 Rol cambiado a: <b>Usuario</b>",
         parse_mode="HTML"
     )
-
+# ==============================
+# Lista de Comandos
+# ==============================
 async def listacomandos(update, context):
 
     uid = update.effective_user.id
@@ -916,7 +974,9 @@ async def listacomandos(update, context):
     comandos_rev = (
         "💼 <b>Comandos para revendedores</b>\n"
         "• /servicios – Ver lista de precios\n"
-        "• /anunciochip – Mostrar anuncio privado de chips\n\n"
+        "• /anunciochip – Mostrar anuncio privado de chips\n"
+        "• /anunciog5 – Mostrar anuncio privado de g5\n"
+        "• /dnis <numero_dni> – Mostrar Informacion de Dni\n\n"
     )
 
     comandos_owner = (
@@ -925,7 +985,8 @@ async def listacomandos(update, context):
         "• /revendedores – Ver lista de revendedores\n"
         "• /delrevendedor – Eliminar verificación\n"
         "• /anuncio – Enviar anuncio global\n"
-        "• /listacomandos – Ver este menú\n\n"
+        "• /listacomandos – Ver este menú\n"
+        "• /dnis <numero_dni> – Mostrar Informacion de Dni\n\n"
     )
 
     # === WHO SEES WHAT ===
@@ -956,94 +1017,122 @@ async def listacomandos(update, context):
 
     return await update.message.reply_text(msg, parse_mode="HTML")
 
+# ==============================
+# soporte
+# ==============================
+async def soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    msg = (
+        "🛠 <b>SOPORTE ⚙️</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "✅ @EmperadorQin\n"
+        "✅ @budaoficial2008\n"
+        "✅ @ElRealCheffcito\n\n"
+        "📌 <i>Contacta a cualquiera de ellos para soporte oficial.</i>"
+    )
+
+    await update.message.reply_text(msg, parse_mode="HTML")
 
 # ==============================
-# ERROR HANDLERS
+# Info DNI
 # ==============================
+async def dnis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-class ConflictFilter(logging.Filter):
-    """Filtro para silenciar errores de Conflict que ya están siendo manejados"""
-    def filter(self, record):
-        # Filtrar mensajes sobre conflictos que ya están siendo manejados
-        if "Conflict: terminated by other getUpdates request" in str(record.getMessage()):
-            return False  # No mostrar este mensaje
-        if "No error handlers are registered" in str(record.getMessage()) and "Conflict" in str(record.getMessage()):
-            return False  # No mostrar este mensaje
-        return True
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja errores globales del bot"""
-    error = context.error
-    
-    # Manejar conflictos de múltiples instancias
-    if isinstance(error, Conflict):
-        logging.warning(f"⚠️ Conflicto detectado: {error}. Otra instancia del bot está ejecutándose.")
-        logging.warning("💡 Solución: Asegúrate de que solo una instancia del bot esté corriendo.")
-        return  # No relanzar el error, solo registrar
-    
-    # Manejar rate limits
-    if isinstance(error, RetryAfter):
-        logging.warning(f"⏳ Rate limit alcanzado. Esperando {error.retry_after} segundos...")
+    if not context.args:
+        await update.message.reply_text("❗ Uso correcto:\n/dnis <dni>")
         return
-    
-    # Manejar errores de red
-    if isinstance(error, NetworkError):
-        logging.warning(f"🌐 Error de red: {error}. Reintentando...")
-        return
-    
-    # Otros errores
-    logging.error(f"❌ Error no manejado: {error}", exc_info=error)
 
-async def post_init(app):
-    """Limpia webhooks y actualizaciones pendientes antes de iniciar polling"""
+    dni = context.args[0].strip()
+
+    if not dni.isdigit() or len(dni) != 8:
+        await update.message.reply_text("❌ DNI inválido.")
+        return
+
+    url = "https://web-production-da283.up.railway.app/dni"
+    params = {
+        "dni": dni,
+        "key": "DJjcSK2nXTEIpexi"
+    }
+
     try:
-        # Eliminar cualquier webhook existente
-        await app.bot.delete_webhook(drop_pending_updates=True)
-        logging.info("🧹 Webhook eliminado (si existía) y actualizaciones pendientes limpiadas")
-    except Exception as e:
-        logging.warning(f"⚠️ No se pudo limpiar webhook (puede ser normal si no había webhook): {e}")
+        r = requests.get(url, params=params, timeout=15)
+        res = r.json()
+    except Exception:
+        await update.message.reply_text("❌ Error al conectar con la API.")
+        return
+
+    if not res.get("success"):
+        await update.message.reply_text("❌ No se pudo obtener información.")
+        return
+
+    data = res.get("data", {})
+    datos = data.get("datos", {})
+
+    # 📄 MENSAJE
+    msg = (
+        "🪪 <b>CONSULTA DNI</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 <b>Nombre:</b> {data.get('nombre')}\n"
+        f"🆔 <b>DNI:</b> <code>{data.get('dni')}</code>\n\n"
+        f"🎂 <b>Fecha Nac.:</b> {datos.get('Fecha de Nacimiento')}\n"
+        f"📊 <b>Edad:</b> {datos.get('Edad')}\n"
+        f"⚧ <b>Sexo:</b> {datos.get('Sexo')}\n"
+        f"💍 <b>Estado Civil:</b> {datos.get('Estado')}\n\n"
+        f"👨 <b>Padre:</b> {datos.get('Padre')}\n"
+        f"👩 <b>Madre:</b> {datos.get('Madre')}\n\n"
+        f"📍 <b>Ubicación:</b>\n"
+        f"{datos.get('Ubicación')}\n"
+        f"{datos.get('Dirección')}\n\n"
+        f"🗂 <b>Ubigeo Nac.:</b> {datos.get('Ubigeo Nacimiento')}\n"
+        f"⚰ <b>Fallecido:</b> {datos.get('Fecha de Fallecimiento')}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🔐 <i>Uso interno - BUDA MARKET</i>"
+    )
+
+    # 📸 FOTO
+    foto = data.get("foto")
+
+    if foto and foto.startswith("data:image"):
+        try:
+            base64_img = foto.split(",")[1]
+            img_bytes = base64.b64decode(base64_img)
+
+            bio = BytesIO(img_bytes)
+            bio.name = "dni.jpg"
+
+            await update.message.reply_photo(
+                photo=bio,
+                caption=msg,
+                parse_mode="HTML"
+            )
+            return
+        except Exception:
+            pass
+
+    await update.message.reply_text(msg, parse_mode="HTML")
+
 
 # ==============================
 # MAIN
 # ==============================
 
 def main():
-    # Configurar logging
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.INFO
-    )
-    
-    # Agregar filtro para silenciar errores de Conflict manejados
-    conflict_filter = ConflictFilter()
-    logging.getLogger().addFilter(conflict_filter)
-    
-    # Configurar logging específico para telegram para reducir ruido de errores manejados
-    telegram_logger = logging.getLogger('telegram')
-    telegram_logger.setLevel(logging.WARNING)  # Solo mostrar warnings y errores críticos
-    telegram_logger.addFilter(conflict_filter)
-    
-    # Configurar el ApplicationBuilder con manejo de errores mejorado
-    app = (
-        ApplicationBuilder()
-        .token(TOKEN)
-        .post_init(post_init)  # Limpiar webhooks antes de iniciar
-        .build()
-    )
-    
-    # Agregar manejador de errores global
-    app.add_error_handler(error_handler)
+
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("register", register))
     app.add_handler(CommandHandler("me", me))
     app.add_handler(CommandHandler("info", info))
+    app.add_handler(CommandHandler("dnis", dnis))
+    app.add_handler(CommandHandler("soporte", soporte))
     app.add_handler(CommandHandler("verificar", verificar))
     app.add_handler(CommandHandler("listacomandos", listacomandos))
     app.add_handler(CommandHandler("revendedores", revendedores))
     app.add_handler(CommandHandler("delrevendedor", delrevendedor))
     app.add_handler(CommandHandler("anuncio", anuncio))
     app.add_handler(CommandHandler("anunciochip", anunciochip))
+    app.add_handler(CommandHandler("anunciog5", anunciog5))
     app.add_handler(CommandHandler("servicios", servicios))
     app.add_handler(CommandHandler("referencias", referencias))
 
@@ -1058,15 +1147,7 @@ def main():
     app.add_handler(MessageHandler(filters.ALL, auto_register_group_on_message))
 
     print("🔥 BUDA MARKET BOT INICIADO…")
-    print("💡 Si ves errores de conflicto, asegúrate de que solo una instancia esté ejecutándose.")
-    
-    # Usar run_polling con parámetros para mejor manejo de errores
-    # drop_pending_updates=True limpia las actualizaciones pendientes al iniciar
-    # El error handler ya maneja los errores Conflict, RetryAfter y NetworkError
-    app.run_polling(
-        drop_pending_updates=True,  # Limpiar actualizaciones pendientes al iniciar
-        close_loop=False
-    )
+    app.run_polling()
 
 
 if __name__ == "__main__":
