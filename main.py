@@ -1,13 +1,25 @@
-import json, os, requests, base64
+import json, os, requests, base64, logging
 from io import BytesIO
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.error import TelegramError, NetworkError, TimedOut
+
+# ==============================
+# CONFIGURACIÓN DE LOGGING
+# ==============================
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # ==============================
 # CONFIGURACIÓN
 # ==============================
 
-TOKEN = "8203432554:AAGAZjEgMjAIkUAMP-LJoYMobooz6N0Y4ug"
+# Intentar obtener el token de variable de entorno, si no existe usar el hardcoded
+TOKEN = os.getenv("TELEGRAM_TOKEN", "8203432554:AAGAZjEgMjAIkUAMP-LJoYMobooz6N0Y4ug")
 
 OWNERS = [6251510385, 8257283392,8306043445]  # AGREGA TUS IDS
 
@@ -1118,6 +1130,7 @@ async def dnis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
 
+    # Construir la aplicación con configuración mejorada
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -1146,8 +1159,30 @@ def main():
     # Detecta grupos antiguos cuando alguien escribe un mensaje
     app.add_handler(MessageHandler(filters.ALL, auto_register_group_on_message))
 
+    logger.info("🔥 BUDA MARKET BOT INICIADO…")
     print("🔥 BUDA MARKET BOT INICIADO…")
-    app.run_polling()
+    
+    # Ejecutar con manejo de errores mejorado
+    # run_polling ya maneja reconexiones automáticas, pero agregamos logging
+    try:
+        app.run_polling(
+            drop_pending_updates=True,
+            close_loop=False
+        )
+    except KeyboardInterrupt:
+        logger.info("Bot detenido por el usuario")
+    except (NetworkError, TimedOut) as e:
+        logger.error(f"Error de red o timeout: {e}")
+        logger.info("El bot intentará reconectarse automáticamente...")
+        # run_polling maneja reconexiones automáticamente
+        raise
+    except TelegramError as e:
+        logger.error(f"Error de Telegram API: {e}")
+        logger.error("Verifica que el token sea válido y que el bot esté activo")
+        raise
+    except Exception as e:
+        logger.error(f"Error inesperado: {type(e).__name__}: {e}")
+        raise
 
 
 if __name__ == "__main__":
