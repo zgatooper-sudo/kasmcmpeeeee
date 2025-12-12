@@ -1,6 +1,8 @@
 import json, os
+import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.error import Conflict, RetryAfter, NetworkError
 
 # ==============================
 # CONFIGURACIÓN
@@ -956,12 +958,81 @@ async def listacomandos(update, context):
 
 
 # ==============================
+# ERROR HANDLERS
+# ==============================
+
+class ConflictFilter(logging.Filter):
+    """Filtro para silenciar errores de Conflict que ya están siendo manejados"""
+    def filter(self, record):
+        # Filtrar mensajes sobre conflictos que ya están siendo manejados
+        if "Conflict: terminated by other getUpdates request" in str(record.getMessage()):
+            return False  # No mostrar este mensaje
+        if "No error handlers are registered" in str(record.getMessage()) and "Conflict" in str(record.getMessage()):
+            return False  # No mostrar este mensaje
+        return True
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja errores globales del bot"""
+    error = context.error
+    
+    # Manejar conflictos de múltiples instancias
+    if isinstance(error, Conflict):
+        logging.warning(f"⚠️ Conflicto detectado: {error}. Otra instancia del bot está ejecutándose.")
+        logging.warning("💡 Solución: Asegúrate de que solo una instancia del bot esté corriendo.")
+        return  # No relanzar el error, solo registrar
+    
+    # Manejar rate limits
+    if isinstance(error, RetryAfter):
+        logging.warning(f"⏳ Rate limit alcanzado. Esperando {error.retry_after} segundos...")
+        return
+    
+    # Manejar errores de red
+    if isinstance(error, NetworkError):
+        logging.warning(f"🌐 Error de red: {error}. Reintentando...")
+        return
+    
+    # Otros errores
+    logging.error(f"❌ Error no manejado: {error}", exc_info=error)
+
+async def post_init(app):
+    """Limpia webhooks y actualizaciones pendientes antes de iniciar polling"""
+    try:
+        # Eliminar cualquier webhook existente
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        logging.info("🧹 Webhook eliminado (si existía) y actualizaciones pendientes limpiadas")
+    except Exception as e:
+        logging.warning(f"⚠️ No se pudo limpiar webhook (puede ser normal si no había webhook): {e}")
+
+# ==============================
 # MAIN
 # ==============================
 
 def main():
-
-    app = ApplicationBuilder().token(TOKEN).build()
+    # Configurar logging
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    
+    # Agregar filtro para silenciar errores de Conflict manejados
+    conflict_filter = ConflictFilter()
+    logging.getLogger().addFilter(conflict_filter)
+    
+    # Configurar logging específico para telegram para reducir ruido de errores manejados
+    telegram_logger = logging.getLogger('telegram')
+    telegram_logger.setLevel(logging.WARNING)  # Solo mostrar warnings y errores críticos
+    telegram_logger.addFilter(conflict_filter)
+    
+    # Configurar el ApplicationBuilder con manejo de errores mejorado
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .post_init(post_init)  # Limpiar webhooks antes de iniciar
+        .build()
+    )
+    
+    # Agregar manejador de errores global
+    app.add_error_handler(error_handler)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("register", register))
@@ -987,7 +1058,15 @@ def main():
     app.add_handler(MessageHandler(filters.ALL, auto_register_group_on_message))
 
     print("🔥 BUDA MARKET BOT INICIADO…")
-    app.run_polling()
+    print("💡 Si ves errores de conflicto, asegúrate de que solo una instancia esté ejecutándose.")
+    
+    # Usar run_polling con parámetros para mejor manejo de errores
+    # drop_pending_updates=True limpia las actualizaciones pendientes al iniciar
+    # El error handler ya maneja los errores Conflict, RetryAfter y NetworkError
+    app.run_polling(
+        drop_pending_updates=True,  # Limpiar actualizaciones pendientes al iniciar
+        close_loop=False
+    )
 
 
 if __name__ == "__main__":
